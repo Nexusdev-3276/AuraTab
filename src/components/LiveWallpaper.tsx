@@ -74,7 +74,7 @@ export const LiveWallpaper: React.FC<LiveWallpaperProps> = ({
   const handleVideoError = async () => {
     if (
       videoRef.current &&
-      wallpaper.videoUrl === '/wallpapers/itachi-blood-moon.mp4' &&
+      wallpaper.videoUrl.includes('itachi-blood-moon.mp4') &&
       !videoRef.current.src.includes('motionbgs.com')
     ) {
       console.log('Falling back to remote high-res Itachi video stream');

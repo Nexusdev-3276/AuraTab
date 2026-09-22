@@ -38,23 +38,24 @@ export const FirefoxExtensionModal: React.FC<FirefoxExtensionModalProps> = ({
       setIsGenerating(true);
       const zip = new JSZip();
 
-      // Helper to generate a real valid PNG icon in addition to SVG
+      // Helper to generate a real valid PNG icon matching the user logo
       const getIconBlob = async (): Promise<Blob> => {
         try {
-          const response = await fetch('/assets/icon.png');
-          if (response.ok) {
-            return await response.blob();
+          const res = await fetch('/assets/icon.png');
+          if (res.ok) {
+            const blob = await res.blob();
+            if (blob.size > 100) return blob;
           }
-        } catch (e) {
-          console.warn('Failed to load custom icon, falling back to generated icon');
+        } catch {
+          // ignore
         }
-        
-        // Fallback to generated if custom fails
+
         const canvas = document.createElement('canvas');
         canvas.width = 96;
         canvas.height = 96;
         const ctx = canvas.getContext('2d');
         if (ctx) {
+          // Dark background with rounded corners
           ctx.fillStyle = '#0f1118';
           ctx.beginPath();
           if (typeof ctx.roundRect === 'function') {
@@ -64,18 +65,66 @@ export const FirefoxExtensionModal: React.FC<FirefoxExtensionModalProps> = ({
           }
           ctx.fill();
 
-          ctx.fillStyle = 'rgba(59, 130, 246, 0.4)';
+          // Dotted orbit circle
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([4, 4]);
           ctx.beginPath();
-          ctx.arc(48, 48, 28, 0, Math.PI * 2);
-          ctx.fill();
+          ctx.arc(48, 48, 38, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
 
-          ctx.fillStyle = '#34d399';
+          // Top and Bottom Diamond Stars
+          ctx.fillStyle = '#ffffff';
+          const drawDiamond = (cx: number, cy: number, w: number, h: number) => {
+            ctx.beginPath();
+            ctx.moveTo(cx, cy - h);
+            ctx.lineTo(cx + w, cy);
+            ctx.lineTo(cx, cy + h);
+            ctx.lineTo(cx - w, cy);
+            ctx.closePath();
+            ctx.fill();
+          };
+          drawDiamond(48, 17, 3, 7);
+          drawDiamond(48, 79, 3, 7);
+
+          // Outer card/contour frame
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+          ctx.lineWidth = 2.5;
+          ctx.lineCap = 'round';
           ctx.beginPath();
-          ctx.moveTo(40, 32);
-          ctx.lineTo(64, 48);
-          ctx.lineTo(40, 64);
+          ctx.moveTo(28, 36);
+          ctx.lineTo(44, 28);
+          ctx.lineTo(68, 28);
+          ctx.lineTo(68, 66);
+          ctx.stroke();
+
+          // Central Stylized Letter A
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.moveTo(48, 24);
+          ctx.lineTo(68, 72);
+          ctx.lineTo(56, 70);
+          ctx.lineTo(48, 50);
+          ctx.lineTo(40, 70);
+          ctx.lineTo(28, 72);
           ctx.closePath();
           ctx.fill();
+
+          // Center cutout in A
+          ctx.fillStyle = '#0f1118';
+          drawDiamond(48, 52, 3.5, 6);
+
+          // Planetary Orbital Ring
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 3;
+          ctx.save();
+          ctx.translate(48, 54);
+          ctx.rotate((-15 * Math.PI) / 180);
+          ctx.beginPath();
+          ctx.ellipse(0, 0, 34, 11, 0, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
         }
         return await new Promise((resolve) => {
           canvas.toBlob((blob) => {
@@ -98,6 +147,8 @@ export const FirefoxExtensionModal: React.FC<FirefoxExtensionModalProps> = ({
           newtab: 'newtab.html',
         },
         permissions: ['storage'],
+        content_security_policy:
+          "script-src 'self'; object-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:;",
         browser_specific_settings: {
           gecko: {
             id: finalId,
@@ -115,65 +166,73 @@ export const FirefoxExtensionModal: React.FC<FirefoxExtensionModalProps> = ({
 
       zip.file('manifest.json', JSON.stringify(manifestContent, null, 2));
 
-      // 2. newtab.html
-      const newTabHtml = `<!DOCTYPE html>
+      // 2. Fetch standalone files to bundle inside extension (No external URL in address bar!)
+      const fetchAsBlob = async (url: string): Promise<Blob | null> => {
+        try {
+          const res = await fetch(url);
+          if (res.ok) return await res.blob();
+        } catch {
+          // ignore
+        }
+        return null;
+      };
+
+      const fetchAsText = async (url: string): Promise<string | null> => {
+        try {
+          const res = await fetch(url);
+          if (res.ok) return await res.text();
+        } catch {
+          // ignore
+        }
+        return null;
+      };
+
+      const htmlContent = await fetchAsText('/extension-build/index.html');
+      const jsContent = await fetchAsText('/extension-build/assets/app.js');
+      const cssContent = await fetchAsText('/extension-build/assets/index.css');
+
+      if (htmlContent && jsContent && cssContent) {
+        // Pure standalone mode: 0 ms load time, 100% offline, NO URL in address bar!
+        zip.file('newtab.html', htmlContent);
+        zip.file('assets/app.js', jsContent);
+        zip.file('assets/index.css', cssContent);
+
+        // Include offline wallpaper assets
+        const wpVideo = await fetchAsBlob('/wallpapers/itachi-blood-moon.mp4');
+        if (wpVideo) {
+          zip.file('wallpapers/itachi-blood-moon.mp4', wpVideo);
+        }
+        const wpThumb = await fetchAsBlob('/wallpapers/itachi-blood-moon.jpg');
+        if (wpThumb) {
+          zip.file('wallpapers/itachi-blood-moon.jpg', wpThumb);
+        }
+      } else {
+        // Fallback loader if build files are not found
+        const fallbackHtml = `<!DOCTYPE html>
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
   <title>AuraTab 4K</title>
   <style>
-    body, html {
-      margin: 0;
-      padding: 0;
-      width: 100%;
-      height: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background-color: #0f1118;
-      color: rgba(255, 255, 255, 0.7);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    }
-    .loader {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 16px;
-    }
-    .spinner {
-      width: 40px;
-      height: 40px;
-      border: 3px stroke rgba(255, 255, 255, 0.1);
-      border-top: 3px solid #ff6a00;
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-    }
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
+    body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: #0f1118; color: #fff; font-family: sans-serif; display: flex; align-items: center; justify-content: center; }
   </style>
 </head>
 <body>
-  <div class="loader">
-    <div class="spinner"></div>
-    <div style="font-size: 14px; font-weight: 500;">Connexion à AuraTab 4K...</div>
-  </div>
   <script src="newtab.js"></script>
 </body>
 </html>`;
-      zip.file('newtab.html', newTabHtml);
-
-      // Create separate newtab.js file to comply with Firefox WebExtension strict CSP
-      const newTabJs = `// Évite l'erreur X-Frame-Options/CSP en redirigeant le conteneur principal (top-level)
-// au lieu d'intégrer le site dans une iframe.
-window.location.replace("${appUrl}");`;
-      zip.file('newtab.js', newTabJs);
+        zip.file('newtab.html', fallbackHtml);
+        zip.file('newtab.js', `window.location.replace("${appUrl}");`);
+      }
 
       // 3. Instructions README.txt
       const readmeText = `=====================================================
-AuraTab 4K - Extension pour Mozilla Firefox
+AuraTab 4K - Extension Autonome pour Mozilla Firefox
 =====================================================
+
+FONCTIONNEMENT SANS URL :
+Cette extension est 100% autonome et fonctionne en local.
+Lorsque vous ouvrez un nouvel onglet, AUCUNE URL n'apparaît dans la barre d'adresse de Firefox (la barre reste totalement propre et prête pour vos recherches).
 
 COMMENT INSTALLER DANS FIREFOX EN 10 SECONDES :
 
@@ -184,9 +243,9 @@ COMMENT INSTALLER DANS FIREFOX EN 10 SECONDES :
    puis appuyez sur Entrée.
 4. Cliquez sur le bouton "Charger un module temporaire...".
 5. Parcourez vos dossiers et sélectionnez le fichier "manifest.json".
-6. C'est prêt ! Ouvrez un nouvel onglet (Ctrl + T) et profitez de vos fonds 4K animés !
+6. C'est prêt ! Ouvrez un nouvel onglet (Ctrl + T) : vos fonds 4K animés apparaissent sans aucune URL externe !
 
-Pour toute modification, vos réglages sont automatiquement conservés.
+Tous vos réglages et favoris sont conservés localement.
 `;
       zip.file('README.txt', readmeText);
 
@@ -194,10 +253,15 @@ Pour toute modification, vos réglages sont automatiquement conservés.
       const pngBlob = await getIconBlob();
       zip.file('icon.png', pngBlob);
 
-      const iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
-  <rect width="48" height="48" rx="12" fill="#0f1118"/>
-  <circle cx="24" cy="24" r="14" fill="#3b82f6" opacity="0.3"/>
-  <polygon points="20,16 32,24 20,32" fill="#34d399"/>
+      const iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96">
+  <rect width="96" height="96" rx="22" fill="#0f1118"/>
+  <circle cx="48" cy="48" r="38" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <polygon points="48,10 51,17 48,24 45,17" fill="#ffffff"/>
+  <polygon points="48,72 51,79 48,86 45,79" fill="#ffffff"/>
+  <path d="M 28 36 L 44 28 L 68 28 L 68 66" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M 48 24 L 68 72 L 56 70 L 48 50 L 40 70 L 28 72 Z" fill="#ffffff"/>
+  <polygon points="48,46 51.5,52 48,58 44.5,52" fill="#0f1118"/>
+  <ellipse cx="48" cy="54" rx="34" ry="11" fill="none" stroke="#ffffff" stroke-width="3" transform="rotate(-15 48 54)"/>
 </svg>`;
       zip.file('icon.svg', iconSvg);
 
@@ -259,11 +323,16 @@ Pour toute modification, vos réglages sont automatiquement conservés.
           {/* Download Action Box */}
           <div className="p-4 rounded-2xl bg-gradient-to-r from-orange-500/10 via-amber-500/10 to-transparent border border-orange-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <div className="text-sm font-semibold text-white">
-                Pack Extension Firefox (.zip)
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-white">
+                  Pack Extension Firefox Autonome (.zip)
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-medium border border-emerald-500/30">
+                  Sans URL externe
+                </span>
               </div>
               <div className="text-xs text-white/60 mt-0.5">
-                Prêt à charger dans Firefox en mode développement ou permanent.
+                100% hors-ligne : la barre d'adresse de Firefox reste totalement vierge (aucun lien Google / AI Studio).
               </div>
             </div>
 
