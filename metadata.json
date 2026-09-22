@@ -1,0 +1,6 @@
+{
+  "name": "AuraTab - 4K Wallpaper & Firefox Startpage",
+  "description": "Nouvel onglet moderne avec fonds d'écran animés, barre de recherche multi-moteurs, raccourcis personnalisables, horloge multi-fuseaux et paramètres complets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
